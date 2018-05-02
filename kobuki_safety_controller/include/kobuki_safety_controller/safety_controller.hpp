@@ -51,6 +51,7 @@
 
 #include <string>
 #include <ros/ros.h>
+#include <haros/haros.h>
 #include <yocs_controllers/default_controller.hpp>
 #include <std_msgs/Empty.h>
 #include <geometry_msgs/Twist.h>
@@ -119,10 +120,13 @@ public:
 private:
   ros::NodeHandle nh_;
   std::string name_;
-  ros::Subscriber enable_controller_subscriber_, disable_controller_subscriber_;
-  ros::Subscriber bumper_event_subscriber_, cliff_event_subscriber_, wheel_event_subscriber_;
-  ros::Subscriber reset_safety_states_subscriber_;
-  ros::Publisher controller_state_publisher_, velocity_command_publisher_;
+  haros::Subscriber<std_msgs::Empty> enable_controller_subscriber_,
+                                     disable_controller_subscriber_;
+  haros::Subscriber<kobuki_msgs::BumperEvent> bumper_event_subscriber_;
+  haros::Subscriber<kobuki_msgs::CliffEvent> cliff_event_subscriber_;
+  haros::Subscriber<kobuki_msgs::WheelDropEvent> wheel_event_subscriber_;
+  haros::Subscriber<std_msgs::Empty> reset_safety_states_subscriber_;
+  haros::Publisher<geometry_msgs::Twist> velocity_command_publisher_;
   bool wheel_left_dropped_, wheel_right_dropped_;
   bool bumper_left_pressed_, bumper_center_pressed_, bumper_right_pressed_;
   bool cliff_left_detected_, cliff_center_detected_, cliff_right_detected_;
@@ -175,6 +179,8 @@ private:
 
 void SafetyController::enableCB(const std_msgs::EmptyConstPtr msg)
 {
+  // messages are empty and independent from previous ones or internal state
+  ROS_ASSERT(true);
   if (this->enable())
   {
     ROS_INFO_STREAM("Controller has been enabled. [" << name_ << "]");
@@ -187,6 +193,8 @@ void SafetyController::enableCB(const std_msgs::EmptyConstPtr msg)
 
 void SafetyController::disableCB(const std_msgs::EmptyConstPtr msg)
 {
+  // messages are empty and independent from previous ones or internal state
+  ROS_ASSERT(true);
   if (this->disable())
   {
     ROS_INFO_STREAM("Controller has been disabled. [" << name_ <<"]");
@@ -199,6 +207,11 @@ void SafetyController::disableCB(const std_msgs::EmptyConstPtr msg)
 
 void SafetyController::cliffEventCB(const kobuki_msgs::CliffEventConstPtr msg)
 {
+  ROS_ASSERT(msg->state == kobuki_msgs::CliffEvent::CLIFF
+          || msg->state == kobuki_msgs::CliffEvent::FLOOR);
+  ROS_ASSERT(msg->sensor == kobuki_msgs::CliffEvent::LEFT
+          || msg->sensor == kobuki_msgs::CliffEvent::CENTER
+          || msg->sensor == kobuki_msgs::CliffEvent::RIGHT);
   if (msg->state == kobuki_msgs::CliffEvent::CLIFF)
   {
     last_event_time_ = ros::Time::now();
@@ -224,6 +237,11 @@ void SafetyController::cliffEventCB(const kobuki_msgs::CliffEventConstPtr msg)
 
 void SafetyController::bumperEventCB(const kobuki_msgs::BumperEventConstPtr msg)
 {
+  ROS_ASSERT(msg->state == kobuki_msgs::BumperEvent::PRESSED
+          || msg->state == kobuki_msgs::BumperEvent::RELEASED);
+  ROS_ASSERT(msg->bumper == kobuki_msgs::BumperEvent::LEFT
+          || msg->bumper == kobuki_msgs::BumperEvent::CENTER
+          || msg->bumper == kobuki_msgs::BumperEvent::RIGHT);
   if (msg->state == kobuki_msgs::BumperEvent::PRESSED)
   {
     last_event_time_ = ros::Time::now();
@@ -249,6 +267,10 @@ void SafetyController::bumperEventCB(const kobuki_msgs::BumperEventConstPtr msg)
 
 void SafetyController::wheelEventCB(const kobuki_msgs::WheelDropEventConstPtr msg)
 {
+  ROS_ASSERT(msg->state == kobuki_msgs::WheelDropEvent::DROPPED
+          || msg->state == kobuki_msgs::WheelDropEvent::RAISED);
+  ROS_ASSERT(msg->wheel == kobuki_msgs::WheelDropEvent::LEFT
+          || msg->wheel == kobuki_msgs::WheelDropEvent::RIGHT);
   if (msg->state == kobuki_msgs::WheelDropEvent::DROPPED)
   {
     // need to keep track of both wheels separately
@@ -285,6 +307,8 @@ void SafetyController::wheelEventCB(const kobuki_msgs::WheelDropEventConstPtr ms
 
 void SafetyController::resetSafetyStatesCB(const std_msgs::EmptyConstPtr msg)
 {
+  // messages are empty and completely independent from previous ones
+  ROS_ASSERT(true);
   wheel_left_dropped_    = false;
   wheel_right_dropped_   = false;
   bumper_left_pressed_   = false;
@@ -300,6 +324,13 @@ void SafetyController::spin()
 {
   if (this->getState())
   {
+    haros::MessageEvent<kobuki_msgs::BumperEvent> last_bumper =
+        bumper_event_subscriber_.lastReceive();
+    haros::MessageEvent<kobuki_msgs::CliffEvent> last_cliff =
+        cliff_event_subscriber_.lastReceive();
+    haros::MessageEvent<kobuki_msgs::WheelDropEvent> last_wheel =
+        wheel_event_subscriber_.lastReceive();
+
     if (wheel_left_dropped_ || wheel_right_dropped_)
     {
       msg_.reset(new geometry_msgs::Twist());
@@ -309,6 +340,8 @@ void SafetyController::spin()
       msg_->angular.x = 0.0;
       msg_->angular.y = 0.0;
       msg_->angular.z = 0.0;
+      ROS_ASSERT(last_wheel
+          && last_wheel.msg->state == kobuki_msgs::WheelDropEvent::DROPPED);
       velocity_command_publisher_.publish(msg_);
     }
     else if (bumper_center_pressed_ || cliff_center_detected_)
@@ -320,6 +353,11 @@ void SafetyController::spin()
       msg_->angular.x = 0.0;
       msg_->angular.y = 0.0;
       msg_->angular.z = 0.0;
+      ROS_ASSERT(!last_wheel
+          || last_wheel.msg->state == kobuki_msgs::WheelDropEvent::RAISED);
+      ROS_ASSERT(last_bumper || last_cliff);
+      // TODO here we need older messages and filters
+      // e.g. last bump where pressed (might have been other bumpers in between)
       velocity_command_publisher_.publish(msg_);
     }
     else if (bumper_left_pressed_ || cliff_left_detected_)
@@ -349,7 +387,7 @@ void SafetyController::spin()
     //if we want to extend the safety state and we're within the time, just keep sending msg_
     else if (time_to_extend_bump_cliff_events_ > ros::Duration(1e-10) && 
 	     ros::Time::now() - last_event_time_ < time_to_extend_bump_cliff_events_) {
-      velocity_command_publisher_.publish(msg_);
+	  velocity_command_publisher_.publish(msg_);
     }
   }
 };
