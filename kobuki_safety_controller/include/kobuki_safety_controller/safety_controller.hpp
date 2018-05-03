@@ -214,6 +214,7 @@ void SafetyController::cliffEventCB(const kobuki_msgs::CliffEventConstPtr msg)
           || msg->sensor == kobuki_msgs::CliffEvent::RIGHT);
   if (msg->state == kobuki_msgs::CliffEvent::CLIFF)
   {
+    cliff_event_subscriber_.bookmark("cliff");
     last_event_time_ = ros::Time::now();
     ROS_DEBUG_STREAM("Cliff detected. Moving backwards. [" << name_ << "]");
     switch (msg->sensor)
@@ -244,6 +245,7 @@ void SafetyController::bumperEventCB(const kobuki_msgs::BumperEventConstPtr msg)
           || msg->bumper == kobuki_msgs::BumperEvent::RIGHT);
   if (msg->state == kobuki_msgs::BumperEvent::PRESSED)
   {
+    bumper_event_subscriber_.bookmark("bumper");
     last_event_time_ = ros::Time::now();
     ROS_DEBUG_STREAM("Bumper pressed. Moving backwards. [" << name_ << "]");
     switch (msg->bumper)
@@ -273,6 +275,7 @@ void SafetyController::wheelEventCB(const kobuki_msgs::WheelDropEventConstPtr ms
           || msg->wheel == kobuki_msgs::WheelDropEvent::RIGHT);
   if (msg->state == kobuki_msgs::WheelDropEvent::DROPPED)
   {
+    wheel_event_subscriber_.bookmark("wheel");
     // need to keep track of both wheels separately
     if (msg->wheel == kobuki_msgs::WheelDropEvent::LEFT)
     {
@@ -325,9 +328,9 @@ void SafetyController::spin()
   if (this->getState())
   {
     haros::MessageEvent<kobuki_msgs::BumperEvent> last_bumper =
-        bumper_event_subscriber_.lastReceive();
+        bumper_event_subscriber_.lastReceive("bumper");
     haros::MessageEvent<kobuki_msgs::CliffEvent> last_cliff =
-        cliff_event_subscriber_.lastReceive();
+        cliff_event_subscriber_.lastReceive("cliff");
     haros::MessageEvent<kobuki_msgs::WheelDropEvent> last_wheel =
         wheel_event_subscriber_.lastReceive();
 
@@ -356,8 +359,8 @@ void SafetyController::spin()
       ROS_ASSERT(!last_wheel
           || last_wheel.msg->state == kobuki_msgs::WheelDropEvent::RAISED);
       ROS_ASSERT(last_bumper || last_cliff);
-      // TODO here we need older messages and filters
-      // e.g. last bump where pressed (might have been other bumpers in between)
+      // TODO we still need to distinguish between all sensors
+      // e.g. last bump where pressed center (might have other bumpers in between)
       velocity_command_publisher_.publish(msg_);
     }
     else if (bumper_left_pressed_ || cliff_left_detected_)
