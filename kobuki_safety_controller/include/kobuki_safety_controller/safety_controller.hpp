@@ -458,9 +458,9 @@ void SafetyController::spin()
     }
     //if we want to extend the safety state and we're within the time, just keep sending msg_
     else if (time_to_extend_bump_cliff_events_ > ros::Duration(1e-10) && 
-	     ros::Time::now() - last_event_time_ < time_to_extend_bump_cliff_events_) {
-	  {
-	    ROS_ASSERT(!lastWheelDrop()); // wheels are not dropped
+        ros::Time::now() - last_event_time_ < time_to_extend_bump_cliff_events_) {
+      {
+        ROS_ASSERT(!lastWheelDrop()); // wheels are not dropped
         Bumper center_bumper = bumper_event_subscriber_.lastReceive("center");
         Cliff center_cliff = cliff_event_subscriber_.lastReceive("center");
         ROS_ASSERT(!center_bumper || center_bumper.msg->state != PRESSED);
@@ -473,8 +473,8 @@ void SafetyController::spin()
         Cliff right_cliff = cliff_event_subscriber_.lastReceive("right");
         ROS_ASSERT(!right_bumper || right_bumper.msg->state != PRESSED);
         ROS_ASSERT(!right_cliff || right_cliff.msg->state != CLIFF);
-	  }
-	  velocity_command_publisher_.publish(msg_);
+      }
+      velocity_command_publisher_.publish(msg_);
     }
   }
 }
