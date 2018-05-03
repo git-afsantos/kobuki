@@ -174,6 +174,8 @@ private:
    * @param msg incoming topic message
    */
   void resetSafetyStatesCB(const std_msgs::EmptyConstPtr msg);
+
+  haros::MessageEvent<kobuki_msgs::WheelDropEvent> lastWheelDrop();
 };
 
 
@@ -214,14 +216,22 @@ void SafetyController::cliffEventCB(const kobuki_msgs::CliffEventConstPtr msg)
           || msg->sensor == kobuki_msgs::CliffEvent::RIGHT);
   if (msg->state == kobuki_msgs::CliffEvent::CLIFF)
   {
-    cliff_event_subscriber_.bookmark("cliff");
     last_event_time_ = ros::Time::now();
     ROS_DEBUG_STREAM("Cliff detected. Moving backwards. [" << name_ << "]");
     switch (msg->sensor)
     {
-      case kobuki_msgs::CliffEvent::LEFT:    cliff_left_detected_   = true;  break;
-      case kobuki_msgs::CliffEvent::CENTER:  cliff_center_detected_ = true;  break;
-      case kobuki_msgs::CliffEvent::RIGHT:   cliff_right_detected_  = true;  break;
+      case kobuki_msgs::CliffEvent::LEFT:
+        cliff_event_subscriber_.bookmark("left");
+        cliff_left_detected_ = true;
+        break;
+      case kobuki_msgs::CliffEvent::CENTER:
+        cliff_event_subscriber_.bookmark("center");
+        cliff_center_detected_ = true;
+        break;
+      case kobuki_msgs::CliffEvent::RIGHT:
+        cliff_event_subscriber_.bookmark("right");
+        cliff_right_detected_ = true;
+        break;
     }
   }
   else // kobuki_msgs::CliffEvent::FLOOR
@@ -229,9 +239,18 @@ void SafetyController::cliffEventCB(const kobuki_msgs::CliffEventConstPtr msg)
     ROS_DEBUG_STREAM("Not detecting any cliffs. Resuming normal operation. [" << name_ << "]");
     switch (msg->sensor)
     {
-      case kobuki_msgs::CliffEvent::LEFT:    cliff_left_detected_   = false; break;
-      case kobuki_msgs::CliffEvent::CENTER:  cliff_center_detected_ = false; break;
-      case kobuki_msgs::CliffEvent::RIGHT:   cliff_right_detected_  = false; break;
+      case kobuki_msgs::CliffEvent::LEFT:
+        cliff_event_subscriber_.bookmark("left");
+        cliff_left_detected_ = false;
+        break;
+      case kobuki_msgs::CliffEvent::CENTER:
+        cliff_event_subscriber_.bookmark("center");
+        cliff_center_detected_ = false;
+        break;
+      case kobuki_msgs::CliffEvent::RIGHT:
+        cliff_event_subscriber_.bookmark("right");
+        cliff_right_detected_  = false;
+        break;
     }
   }
 };
@@ -245,14 +264,22 @@ void SafetyController::bumperEventCB(const kobuki_msgs::BumperEventConstPtr msg)
           || msg->bumper == kobuki_msgs::BumperEvent::RIGHT);
   if (msg->state == kobuki_msgs::BumperEvent::PRESSED)
   {
-    bumper_event_subscriber_.bookmark("bumper");
     last_event_time_ = ros::Time::now();
     ROS_DEBUG_STREAM("Bumper pressed. Moving backwards. [" << name_ << "]");
     switch (msg->bumper)
     {
-      case kobuki_msgs::BumperEvent::LEFT:    bumper_left_pressed_   = true;  break;
-      case kobuki_msgs::BumperEvent::CENTER:  bumper_center_pressed_ = true;  break;
-      case kobuki_msgs::BumperEvent::RIGHT:   bumper_right_pressed_  = true;  break;
+      case kobuki_msgs::BumperEvent::LEFT:
+        bumper_event_subscriber_.bookmark("left");
+        bumper_left_pressed_ = true;
+        break;
+      case kobuki_msgs::BumperEvent::CENTER:
+        bumper_event_subscriber_.bookmark("center");
+        bumper_center_pressed_ = true;
+        break;
+      case kobuki_msgs::BumperEvent::RIGHT:
+        bumper_event_subscriber_.bookmark("right");
+        bumper_right_pressed_ = true;
+        break;
     }
   }
   else // kobuki_msgs::BumperEvent::RELEASED
@@ -260,9 +287,18 @@ void SafetyController::bumperEventCB(const kobuki_msgs::BumperEventConstPtr msg)
     ROS_DEBUG_STREAM("No bumper pressed. Resuming normal operation. [" << name_ << "]");
     switch (msg->bumper)
     {
-      case kobuki_msgs::BumperEvent::LEFT:    bumper_left_pressed_   = false; break;
-      case kobuki_msgs::BumperEvent::CENTER:  bumper_center_pressed_ = false; break;
-      case kobuki_msgs::BumperEvent::RIGHT:   bumper_right_pressed_  = false; break;
+      case kobuki_msgs::BumperEvent::LEFT:
+        bumper_event_subscriber_.bookmark("left");
+        bumper_left_pressed_ = false;
+        break;
+      case kobuki_msgs::BumperEvent::CENTER:
+        bumper_event_subscriber_.bookmark("center");
+        bumper_center_pressed_ = false;
+        break;
+      case kobuki_msgs::BumperEvent::RIGHT:
+        bumper_event_subscriber_.bookmark("right");
+        bumper_right_pressed_ = false;
+        break;
     }
   }
 };
@@ -275,16 +311,17 @@ void SafetyController::wheelEventCB(const kobuki_msgs::WheelDropEventConstPtr ms
           || msg->wheel == kobuki_msgs::WheelDropEvent::RIGHT);
   if (msg->state == kobuki_msgs::WheelDropEvent::DROPPED)
   {
-    wheel_event_subscriber_.bookmark("wheel");
     // need to keep track of both wheels separately
     if (msg->wheel == kobuki_msgs::WheelDropEvent::LEFT)
     {
       ROS_DEBUG_STREAM("Left wheel dropped. [" << name_ << "]");
+      wheel_event_subscriber_.bookmark("left");
       wheel_left_dropped_ = true;
     }
     else // kobuki_msgs::WheelDropEvent::RIGHT
     {
       ROS_DEBUG_STREAM("Right wheel dropped. [" << name_ << "]");
+      wheel_event_subscriber_.bookmark("right");
       wheel_right_dropped_ = true;
     }
   }
@@ -294,11 +331,13 @@ void SafetyController::wheelEventCB(const kobuki_msgs::WheelDropEventConstPtr ms
     if (msg->wheel == kobuki_msgs::WheelDropEvent::LEFT)
     {
       ROS_DEBUG_STREAM("Left wheel raised. [" << name_ << "]");
+      wheel_event_subscriber_.bookmark("left");
       wheel_left_dropped_ = false;
     }
     else // kobuki_msgs::WheelDropEvent::RIGHT
     {
       ROS_DEBUG_STREAM("Right wheel raised. [" << name_ << "]");
+      wheel_event_subscriber_.bookmark("right");
       wheel_right_dropped_ = false;
     }
     if (!wheel_left_dropped_ && !wheel_right_dropped_)
@@ -327,12 +366,15 @@ void SafetyController::spin()
 {
   if (this->getState())
   {
-    haros::MessageEvent<kobuki_msgs::BumperEvent> last_bumper =
-        bumper_event_subscriber_.lastReceive("bumper");
-    haros::MessageEvent<kobuki_msgs::CliffEvent> last_cliff =
-        cliff_event_subscriber_.lastReceive("cliff");
-    haros::MessageEvent<kobuki_msgs::WheelDropEvent> last_wheel =
-        wheel_event_subscriber_.lastReceive();
+    //--------------------------------------------------------------------------
+    // all of this is just to write shorter properties
+    typedef haros::MessageEvent<kobuki_msgs::BumperEvent> Bumper;
+    typedef haros::MessageEvent<kobuki_msgs::CliffEvent> Cliff;
+    typedef haros::MessageEvent<kobuki_msgs::WheelDropEvent> Wheel;
+    const uint8_t PRESSED = kobuki_msgs::BumperEvent::PRESSED;
+    const uint8_t CLIFF = kobuki_msgs::CliffEvent::CLIFF;
+    const uint8_t DROPPED = kobuki_msgs::WheelDropEvent::DROPPED;
+    //--------------------------------------------------------------------------
 
     if (wheel_left_dropped_ || wheel_right_dropped_)
     {
@@ -343,8 +385,7 @@ void SafetyController::spin()
       msg_->angular.x = 0.0;
       msg_->angular.y = 0.0;
       msg_->angular.z = 0.0;
-      ROS_ASSERT(last_wheel
-          && last_wheel.msg->state == kobuki_msgs::WheelDropEvent::DROPPED);
+      ROS_ASSERT(lastWheelDrop());  // a wheel drop exists
       velocity_command_publisher_.publish(msg_);
     }
     else if (bumper_center_pressed_ || cliff_center_detected_)
@@ -356,11 +397,13 @@ void SafetyController::spin()
       msg_->angular.x = 0.0;
       msg_->angular.y = 0.0;
       msg_->angular.z = 0.0;
-      ROS_ASSERT(!last_wheel
-          || last_wheel.msg->state == kobuki_msgs::WheelDropEvent::RAISED);
-      ROS_ASSERT(last_bumper || last_cliff);
-      // TODO we still need to distinguish between all sensors
-      // e.g. last bump where pressed center (might have other bumpers in between)
+      {
+        ROS_ASSERT(!lastWheelDrop()); // wheels are not dropped
+        Bumper last_bumper = bumper_event_subscriber_.lastReceive("center");
+        Cliff last_cliff = cliff_event_subscriber_.lastReceive("center");
+        ROS_ASSERT((last_bumper && last_bumper.msg->state == PRESSED)
+                || (last_cliff && last_cliff.msg->state == CLIFF));
+      }
       velocity_command_publisher_.publish(msg_);
     }
     else if (bumper_left_pressed_ || cliff_left_detected_)
@@ -373,6 +416,17 @@ void SafetyController::spin()
       msg_->angular.x = 0.0;
       msg_->angular.y = 0.0;
       msg_->angular.z = -0.4;
+      {
+        ROS_ASSERT(!lastWheelDrop()); // wheels are not dropped
+        Bumper center_bumper = bumper_event_subscriber_.lastReceive("center");
+        Cliff center_cliff = cliff_event_subscriber_.lastReceive("center");
+        ROS_ASSERT(!center_bumper || center_bumper.msg->state != PRESSED);
+        ROS_ASSERT(!center_cliff || center_cliff.msg->state != CLIFF);
+        Bumper left_bumper = bumper_event_subscriber_.lastReceive("left");
+        Cliff left_cliff = cliff_event_subscriber_.lastReceive("left");
+        ROS_ASSERT((left_bumper && left_bumper.msg->state == PRESSED)
+                || (left_cliff && left_cliff.msg->state == CLIFF));
+      }
       velocity_command_publisher_.publish(msg_);
     }
     else if (bumper_right_pressed_ || cliff_right_detected_)
@@ -385,15 +439,64 @@ void SafetyController::spin()
       msg_->angular.x = 0.0;
       msg_->angular.y = 0.0;
       msg_->angular.z = 0.4;
+      {
+        ROS_ASSERT(!lastWheelDrop()); // wheels are not dropped
+        Bumper center_bumper = bumper_event_subscriber_.lastReceive("center");
+        Cliff center_cliff = cliff_event_subscriber_.lastReceive("center");
+        ROS_ASSERT(!center_bumper || center_bumper.msg->state != PRESSED);
+        ROS_ASSERT(!center_cliff || center_cliff.msg->state != CLIFF);
+        Bumper left_bumper = bumper_event_subscriber_.lastReceive("left");
+        Cliff left_cliff = cliff_event_subscriber_.lastReceive("left");
+        ROS_ASSERT(!left_bumper || left_bumper.msg->state != PRESSED);
+        ROS_ASSERT(!left_cliff || left_cliff.msg->state != CLIFF);
+        Bumper right_bumper = bumper_event_subscriber_.lastReceive("right");
+        Cliff right_cliff = cliff_event_subscriber_.lastReceive("right");
+        ROS_ASSERT((right_bumper && right_bumper.msg->state == PRESSED)
+                || (right_cliff && right_cliff.msg->state == CLIFF));
+      }
       velocity_command_publisher_.publish(msg_);
     }
     //if we want to extend the safety state and we're within the time, just keep sending msg_
     else if (time_to_extend_bump_cliff_events_ > ros::Duration(1e-10) && 
 	     ros::Time::now() - last_event_time_ < time_to_extend_bump_cliff_events_) {
+	  {
+	    ROS_ASSERT(!lastWheelDrop()); // wheels are not dropped
+        Bumper center_bumper = bumper_event_subscriber_.lastReceive("center");
+        Cliff center_cliff = cliff_event_subscriber_.lastReceive("center");
+        ROS_ASSERT(!center_bumper || center_bumper.msg->state != PRESSED);
+        ROS_ASSERT(!center_cliff || center_cliff.msg->state != CLIFF);
+        Bumper left_bumper = bumper_event_subscriber_.lastReceive("left");
+        Cliff left_cliff = cliff_event_subscriber_.lastReceive("left");
+        ROS_ASSERT(!left_bumper || left_bumper.msg->state != PRESSED);
+        ROS_ASSERT(!left_cliff || left_cliff.msg->state != CLIFF);
+        Bumper right_bumper = bumper_event_subscriber_.lastReceive("right");
+        Cliff right_cliff = cliff_event_subscriber_.lastReceive("right");
+        ROS_ASSERT(!right_bumper || right_bumper.msg->state != PRESSED);
+        ROS_ASSERT(!right_cliff || right_cliff.msg->state != CLIFF);
+	  }
 	  velocity_command_publisher_.publish(msg_);
     }
   }
-};
+}
+
+haros::MessageEvent<kobuki_msgs::WheelDropEvent> SafetyController::lastWheelDrop()
+{
+  const haros::MessageEvent<kobuki_msgs::WheelDropEvent> left =
+      wheel_event_subscriber_.lastReceive("left");
+  const haros::MessageEvent<kobuki_msgs::WheelDropEvent> right =
+      wheel_event_subscriber_.lastReceive("right");
+  const bool left_drop =
+      left && left.msg->state == kobuki_msgs::WheelDropEvent::DROPPED;
+  const bool right_drop =
+      right && right.msg->state == kobuki_msgs::WheelDropEvent::DROPPED;
+  if (left_drop && right_drop)
+    { return left > right ? left : right; }
+  if (left_drop)
+    { return left; }
+  if (right_drop)
+    { return right; }
+  return haros::MessageEvent<kobuki_msgs::WheelDropEvent>();
+}
 
 } // namespace kobuki
 
