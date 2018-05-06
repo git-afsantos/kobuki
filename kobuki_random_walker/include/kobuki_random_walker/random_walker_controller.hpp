@@ -27,6 +27,7 @@
 #include <kobuki_msgs/Led.h>
 #include <kobuki_msgs/WheelDropEvent.h>
 #include <ros/ros.h>
+#include <haros/haros.h>
 #include <std_msgs/Empty.h>
 #include <yocs_controllers/default_controller.hpp>
 
@@ -100,11 +101,15 @@ private:
   /// Node(let) name
   std::string name_;
   /// Subscribers
-  ros::Subscriber enable_controller_subscriber_, disable_controller_subscriber_;
+  haros::Subscriber<std_msgs::Empty> enable_controller_subscriber_,
+                                     disable_controller_subscriber_;
   /// Subscribers
-  ros::Subscriber bumper_event_subscriber_, cliff_event_subscriber_, wheel_drop_event_subscriber_;
+  haros::Subscriber<kobuki_msgs::BumperEvent> bumper_event_subscriber_;
+  haros::Subscriber<kobuki_msgs::CliffEvent> cliff_event_subscriber_;
+  haros::Subscriber<kobuki_msgs::WheelDropEvent> wheel_drop_event_subscriber_;
   /// Publishers
-  ros::Publisher cmd_vel_publisher_, led1_publisher_, led2_publisher_;
+  haros::Publisher<geometry_msgs::Twist> cmd_vel_publisher_;
+  haros::Publisher<kobuki_msgs::Led> led1_publisher_, led2_publisher_;
   /// Flag for changing direction
   bool change_direction_;
   /// Flag for stopping
@@ -173,10 +178,15 @@ private:
    * @param msg wheel drop event
    */
   void wheelDropEventCB(const kobuki_msgs::WheelDropEventConstPtr msg);
+
+  haros::MessageEvent<kobuki_msgs::BumperEvent> lastBump() const;
+
+  haros::MessageEvent<kobuki_msgs::CliffEvent> lastCliff() const;
 };
 
 void RandomWalkerController::enableCB(const std_msgs::EmptyConstPtr msg)
 {
+  ROS_ASSERT(true); // nothing relevant to say
   if (this->enable())
   {
     ROS_INFO_STREAM("Controller has been enabled. [" << name_ << "]");
@@ -189,6 +199,7 @@ void RandomWalkerController::enableCB(const std_msgs::EmptyConstPtr msg)
 
 void RandomWalkerController::disableCB(const std_msgs::EmptyConstPtr msg)
 {
+  ROS_ASSERT(true); // nothing relevant to say
   if (this->disable())
   {
     ROS_INFO_STREAM("Controller has been disabled. [" << name_ <<"]");
@@ -201,6 +212,11 @@ void RandomWalkerController::disableCB(const std_msgs::EmptyConstPtr msg)
 
 void RandomWalkerController::bumperEventCB(const kobuki_msgs::BumperEventConstPtr msg)
 {
+  ROS_ASSERT(msg->state == kobuki_msgs::BumperEvent::PRESSED
+          || msg->state == kobuki_msgs::BumperEvent::RELEASED);
+  ROS_ASSERT(msg->bumper == kobuki_msgs::BumperEvent::LEFT
+          || msg->bumper == kobuki_msgs::BumperEvent::CENTER
+          || msg->bumper == kobuki_msgs::BumperEvent::RIGHT);
   if (this->getState()) // check, if the controller is active
   {
     if (msg->state == kobuki_msgs::BumperEvent::PRESSED)
@@ -212,6 +228,7 @@ void RandomWalkerController::bumperEventCB(const kobuki_msgs::BumperEventConstPt
           {
             bumper_left_pressed_ = true;
             change_direction_ = true;
+            bumper_event_subscriber_.bookmark("left");
           }
           break;
         case kobuki_msgs::BumperEvent::CENTER:
@@ -219,6 +236,7 @@ void RandomWalkerController::bumperEventCB(const kobuki_msgs::BumperEventConstPt
           {
             bumper_center_pressed_ = true;
             change_direction_ = true;
+            bumper_event_subscriber_.bookmark("center");
           }
           break;
         case kobuki_msgs::BumperEvent::RIGHT:
@@ -226,6 +244,7 @@ void RandomWalkerController::bumperEventCB(const kobuki_msgs::BumperEventConstPt
           {
             bumper_right_pressed_ = true;
             change_direction_ = true;
+            bumper_event_subscriber_.bookmark("right");
           }
           break;
       }
@@ -234,9 +253,18 @@ void RandomWalkerController::bumperEventCB(const kobuki_msgs::BumperEventConstPt
     {
       switch (msg->bumper)
       {
-        case kobuki_msgs::BumperEvent::LEFT:    bumper_left_pressed_   = false; break;
-        case kobuki_msgs::BumperEvent::CENTER:  bumper_center_pressed_ = false; break;
-        case kobuki_msgs::BumperEvent::RIGHT:   bumper_right_pressed_  = false; break;
+        case kobuki_msgs::BumperEvent::LEFT:
+          bumper_event_subscriber_.bookmark("left");
+          bumper_left_pressed_ = false;
+          break;
+        case kobuki_msgs::BumperEvent::CENTER:
+          bumper_event_subscriber_.bookmark("center");
+          bumper_center_pressed_ = false;
+          break;
+        case kobuki_msgs::BumperEvent::RIGHT:
+          bumper_event_subscriber_.bookmark("right");
+          bumper_right_pressed_ = false;
+          break;
       }
     }
     if (!led_bumper_on_ && (bumper_left_pressed_ || bumper_center_pressed_ || bumper_right_pressed_))
@@ -244,6 +272,19 @@ void RandomWalkerController::bumperEventCB(const kobuki_msgs::BumperEventConstPt
       kobuki_msgs::LedPtr led_msg_ptr;
       led_msg_ptr.reset(new kobuki_msgs::Led());
       led_msg_ptr->value = kobuki_msgs::Led::ORANGE;
+      {
+        const uint8_t PRESSED = kobuki_msgs::BumperEvent::PRESSED;
+        const haros::MessageEvent<kobuki_msgs::BumperEvent>
+            last_left = bumper_event_subscriber_.lastReceive("left"),
+            last_center = bumper_event_subscriber_.lastReceive("center"),
+            last_right = bumper_event_subscriber_.lastReceive("right");
+        // This message is a bumper PRESSED, or the most recent message
+        // for some of the bumpers was PRESSED.
+        ROS_ASSERT(msg->state == PRESSED
+          || (last_left && last_left.msg->state == PRESSED)
+          || (last_center && last_center.msg->state == PRESSED)
+          || (last_right && last_right.msg->state == PRESSED));
+      }
       led1_publisher_.publish(led_msg_ptr);
       led_bumper_on_ = true;
     }
@@ -252,6 +293,25 @@ void RandomWalkerController::bumperEventCB(const kobuki_msgs::BumperEventConstPt
       kobuki_msgs::LedPtr led_msg_ptr;
       led_msg_ptr.reset(new kobuki_msgs::Led());
       led_msg_ptr->value = kobuki_msgs::Led::BLACK;
+      {
+        const uint8_t RELEASED = kobuki_msgs::BumperEvent::RELEASED;
+        const uint8_t LEFT = kobuki_msgs::BumperEvent::LEFT;
+        const uint8_t CENTER = kobuki_msgs::BumperEvent::CENTER;
+        const uint8_t RIGHT = kobuki_msgs::BumperEvent::RIGHT;
+        const haros::MessageEvent<kobuki_msgs::BumperEvent>
+            last_left = bumper_event_subscriber_.lastReceive("left"),
+            last_center = bumper_event_subscriber_.lastReceive("center"),
+            last_right = bumper_event_subscriber_.lastReceive("right");
+        // This message is a bumper RELEASED and the most recent message
+        // for the other bumpers was also RELEASED.
+        ROS_ASSERT(msg->state == RELEASED);
+        ROS_ASSERT(msg->bumper == LEFT
+            || (last_left && last_left.msg->state == RELEASED));
+        ROS_ASSERT(msg->bumper == CENTER
+            || (last_center && last_center.msg->state == RELEASED));
+        ROS_ASSERT(msg->bumper == RIGHT
+            || (last_right && last_right.msg->state == RELEASED));
+      }
       led1_publisher_.publish(led_msg_ptr);
       led_bumper_on_ = false;
     }
@@ -264,6 +324,11 @@ void RandomWalkerController::bumperEventCB(const kobuki_msgs::BumperEventConstPt
 
 void RandomWalkerController::cliffEventCB(const kobuki_msgs::CliffEventConstPtr msg)
 {
+  ROS_ASSERT(msg->state == kobuki_msgs::CliffEvent::CLIFF
+          || msg->state == kobuki_msgs::CliffEvent::FLOOR);
+  ROS_ASSERT(msg->sensor == kobuki_msgs::CliffEvent::LEFT
+          || msg->sensor == kobuki_msgs::CliffEvent::CENTER
+          || msg->sensor == kobuki_msgs::CliffEvent::RIGHT);
   if (msg->state == kobuki_msgs::CliffEvent::CLIFF)
   {
     switch (msg->sensor)
@@ -273,6 +338,7 @@ void RandomWalkerController::cliffEventCB(const kobuki_msgs::CliffEventConstPtr 
         {
           cliff_left_detected_ = true;
           change_direction_ = true;
+          cliff_event_subscriber_.bookmark("left");
         }
         break;
       case kobuki_msgs::CliffEvent::CENTER:
@@ -280,6 +346,7 @@ void RandomWalkerController::cliffEventCB(const kobuki_msgs::CliffEventConstPtr 
         {
           cliff_center_detected_ = true;
           change_direction_ = true;
+          cliff_event_subscriber_.bookmark("center");
         }
         break;
       case kobuki_msgs::CliffEvent::RIGHT:
@@ -287,6 +354,7 @@ void RandomWalkerController::cliffEventCB(const kobuki_msgs::CliffEventConstPtr 
         {
           cliff_right_detected_ = true;
           change_direction_ = true;
+          cliff_event_subscriber_.bookmark("right");
         }
         break;
     }
@@ -295,9 +363,18 @@ void RandomWalkerController::cliffEventCB(const kobuki_msgs::CliffEventConstPtr 
   {
     switch (msg->sensor)
     {
-      case kobuki_msgs::CliffEvent::LEFT:    cliff_left_detected_   = false; break;
-      case kobuki_msgs::CliffEvent::CENTER:  cliff_center_detected_ = false; break;
-      case kobuki_msgs::CliffEvent::RIGHT:   cliff_right_detected_  = false; break;
+      case kobuki_msgs::CliffEvent::LEFT:
+        cliff_event_subscriber_.bookmark("left");
+        cliff_left_detected_ = false;
+        break;
+      case kobuki_msgs::CliffEvent::CENTER:
+        cliff_event_subscriber_.bookmark("center");
+        cliff_center_detected_ = false;
+        break;
+      case kobuki_msgs::CliffEvent::RIGHT:
+        cliff_event_subscriber_.bookmark("right");
+        cliff_right_detected_ = false;
+        break;
     }
   }
   if (!led_cliff_on_ && (cliff_left_detected_ || cliff_center_detected_ || cliff_right_detected_))
@@ -305,6 +382,19 @@ void RandomWalkerController::cliffEventCB(const kobuki_msgs::CliffEventConstPtr 
     kobuki_msgs::LedPtr led_msg_ptr;
     led_msg_ptr.reset(new kobuki_msgs::Led());
     led_msg_ptr->value = kobuki_msgs::Led::ORANGE;
+    {
+      const uint8_t CLIFF = kobuki_msgs::CliffEvent::CLIFF;
+      const haros::MessageEvent<kobuki_msgs::CliffEvent>
+          last_left = cliff_event_subscriber_.lastReceive("left"),
+          last_center = cliff_event_subscriber_.lastReceive("center"),
+          last_right = cliff_event_subscriber_.lastReceive("right");
+      // This message is a CLIFF, or the most recent message for some
+      // of the sensors was a CLIFF.
+      ROS_ASSERT(msg->state == CLIFF
+          || (last_left && last_left.msg->state == CLIFF)
+          || (last_center && last_center.msg->state == CLIFF)
+          || (last_right && last_right.msg->state == CLIFF));
+    }
     led2_publisher_.publish(led_msg_ptr);
     led_cliff_on_ = true;
   }
@@ -313,6 +403,25 @@ void RandomWalkerController::cliffEventCB(const kobuki_msgs::CliffEventConstPtr 
     kobuki_msgs::LedPtr led_msg_ptr;
     led_msg_ptr.reset(new kobuki_msgs::Led());
     led_msg_ptr->value = kobuki_msgs::Led::BLACK;
+    {
+      const uint8_t FLOOR = kobuki_msgs::CliffEvent::FLOOR;
+      const uint8_t LEFT = kobuki_msgs::CliffEvent::LEFT;
+      const uint8_t CENTER = kobuki_msgs::CliffEvent::CENTER;
+      const uint8_t RIGHT = kobuki_msgs::CliffEvent::RIGHT;
+      const haros::MessageEvent<kobuki_msgs::CliffEvent>
+          last_left = cliff_event_subscriber_.lastReceive("left"),
+          last_center = cliff_event_subscriber_.lastReceive("center"),
+          last_right = cliff_event_subscriber_.lastReceive("right");
+      // This message is a FLOOR and the most recent message
+      // for the other sensors was also FLOOR.
+      ROS_ASSERT(msg->state == FLOOR);
+      ROS_ASSERT(msg->sensor == LEFT
+          || (last_left && last_left.msg->state == FLOOR));
+      ROS_ASSERT(msg->sensor == CENTER
+          || (last_center && last_center.msg->state == FLOOR));
+      ROS_ASSERT(msg->sensor == RIGHT
+          || (last_right && last_right.msg->state == FLOOR));
+    }
     led2_publisher_.publish(led_msg_ptr);
     led_cliff_on_ = false;
   }
@@ -324,6 +433,10 @@ void RandomWalkerController::cliffEventCB(const kobuki_msgs::CliffEventConstPtr 
 
 void RandomWalkerController::wheelDropEventCB(const kobuki_msgs::WheelDropEventConstPtr msg)
 {
+  ROS_ASSERT(msg->state == kobuki_msgs::WheelDropEvent::DROPPED
+          || msg->state == kobuki_msgs::WheelDropEvent::RAISED);
+  ROS_ASSERT(msg->wheel == kobuki_msgs::WheelDropEvent::LEFT
+          || msg->wheel == kobuki_msgs::WheelDropEvent::RIGHT);
   if (msg->state == kobuki_msgs::WheelDropEvent::DROPPED)
   {
     switch (msg->wheel)
@@ -332,12 +445,14 @@ void RandomWalkerController::wheelDropEventCB(const kobuki_msgs::WheelDropEventC
         if (!wheel_drop_left_detected_)
         {
           wheel_drop_left_detected_ = true;
+          wheel_drop_event_subscriber_.bookmark("left");
         }
         break;
       case kobuki_msgs::WheelDropEvent::RIGHT:
         if (!wheel_drop_right_detected_)
         {
           wheel_drop_right_detected_ = true;
+          wheel_drop_event_subscriber_.bookmark("right");
         }
         break;
     }
@@ -346,8 +461,14 @@ void RandomWalkerController::wheelDropEventCB(const kobuki_msgs::WheelDropEventC
   {
     switch (msg->wheel)
     {
-      case kobuki_msgs::WheelDropEvent::LEFT:    wheel_drop_left_detected_   = false; break;
-      case kobuki_msgs::WheelDropEvent::RIGHT:   wheel_drop_right_detected_  = false; break;
+      case kobuki_msgs::WheelDropEvent::LEFT:
+        wheel_drop_event_subscriber_.bookmark("left");
+        wheel_drop_left_detected_ = false;
+        break;
+      case kobuki_msgs::WheelDropEvent::RIGHT:
+        wheel_drop_event_subscriber_.bookmark("right");
+        wheel_drop_right_detected_ = false;
+        break;
     }
   }
   if (!led_wheel_drop_on_ && (wheel_drop_left_detected_ || wheel_drop_right_detected_))
@@ -355,6 +476,17 @@ void RandomWalkerController::wheelDropEventCB(const kobuki_msgs::WheelDropEventC
     kobuki_msgs::LedPtr led_msg_ptr;
     led_msg_ptr.reset(new kobuki_msgs::Led());
     led_msg_ptr->value = kobuki_msgs::Led::RED;
+    {
+      const uint8_t DROPPED = kobuki_msgs::WheelDropEvent::DROPPED;
+      const haros::MessageEvent<kobuki_msgs::WheelDropEvent>
+          last_left = wheel_drop_event_subscriber_.lastReceive("left"),
+          last_right = wheel_drop_event_subscriber_.lastReceive("right");
+      // This message is a wheel DROPPED, or the most recent message for some
+      // of the wheels was a DROPPED.
+      ROS_ASSERT(msg->state == DROPPED
+          || (last_left && last_left.msg->state == DROPPED)
+          || (last_right && last_right.msg->state == DROPPED));
+    }
     led1_publisher_.publish(led_msg_ptr);
     led2_publisher_.publish(led_msg_ptr);
     stop_ = true;
@@ -365,6 +497,21 @@ void RandomWalkerController::wheelDropEventCB(const kobuki_msgs::WheelDropEventC
     kobuki_msgs::LedPtr led_msg_ptr;
     led_msg_ptr.reset(new kobuki_msgs::Led());
     led_msg_ptr->value = kobuki_msgs::Led::BLACK;
+    {
+      const uint8_t RAISED = kobuki_msgs::WheelDropEvent::RAISED;
+      const uint8_t LEFT = kobuki_msgs::WheelDropEvent::LEFT;
+      const uint8_t RIGHT = kobuki_msgs::WheelDropEvent::RIGHT;
+      const haros::MessageEvent<kobuki_msgs::WheelDropEvent>
+          last_left = wheel_drop_event_subscriber_.lastReceive("left"),
+          last_right = wheel_drop_event_subscriber_.lastReceive("right");
+      // This message is a wheel RAISED and the most recent message
+      // for the other wheel was also RAISED.
+      ROS_ASSERT(msg->state == RAISED);
+      ROS_ASSERT(msg->wheel == LEFT
+          || (last_left && last_left.msg->state == RAISED));
+      ROS_ASSERT(msg->wheel == RIGHT
+          || (last_right && last_right.msg->state == RAISED));
+    }
     led1_publisher_.publish(led_msg_ptr);
     led2_publisher_.publish(led_msg_ptr);
     stop_ = false;
@@ -386,6 +533,18 @@ void RandomWalkerController::spin()
 
     if (stop_)
     {
+      {
+        // Message is initialised to zeroes.
+        ROS_ASSERT(cmd_vel_msg_ptr->linear.x == 0.0);
+        ROS_ASSERT(cmd_vel_msg_ptr->angular.z == 0.0);
+        const uint8_t DROPPED = kobuki_msgs::WheelDropEvent::DROPPED;
+        const haros::MessageEvent<kobuki_msgs::WheelDropEvent>
+            last_left = wheel_drop_event_subscriber_.lastReceive("left"),
+            last_right = wheel_drop_event_subscriber_.lastReceive("right");
+        // The most recent message for some of the wheels was a wheel DROPPED.
+        ROS_ASSERT((last_left && last_left.msg->state == DROPPED)
+            || (last_right && last_right.msg->state == DROPPED));
+      }
       cmd_vel_publisher_.publish(cmd_vel_msg_ptr); // will be all zero when initialised
       return;
     }
@@ -416,6 +575,26 @@ void RandomWalkerController::spin()
       if ((ros::Time::now() - turning_start_) < turning_duration_)
       {
         cmd_vel_msg_ptr->angular.z = turning_direction_ * vel_ang_;
+        {
+          const uint8_t PRESSED = kobuki_msgs::BumperEvent::PRESSED;
+          const haros::MessageEvent<kobuki_msgs::BumperEvent>
+              bumper_left = bumper_event_subscriber_.lastReceive("left"),
+              bumper_center = bumper_event_subscriber_.lastReceive("center"),
+              bumper_right = bumper_event_subscriber_.lastReceive("right");
+          // The most recent message for some of the bumpers was PRESSED.
+          ROS_ASSERT((bumper_left && bumper_left.msg->state == PRESSED)
+              || (bumper_center && bumper_center.msg->state == PRESSED)
+              || (bumper_right && bumper_right.msg->state == PRESSED));
+          const uint8_t CLIFF = kobuki_msgs::CliffEvent::CLIFF;
+          const haros::MessageEvent<kobuki_msgs::CliffEvent>
+              cliff_left = cliff_event_subscriber_.lastReceive("left"),
+              cliff_center = cliff_event_subscriber_.lastReceive("center"),
+              cliff_right = cliff_event_subscriber_.lastReceive("right");
+          // The most recent message for some of the sensors was a CLIFF.
+          ROS_ASSERT((cliff_left && cliff_left.msg->state == CLIFF)
+              || (cliff_center && cliff_center.msg->state == CLIFF)
+              || (cliff_right && cliff_right.msg->state == CLIFF));
+        }
         cmd_vel_publisher_.publish(cmd_vel_msg_ptr);
       }
       else
@@ -426,10 +605,93 @@ void RandomWalkerController::spin()
     else
     {
       cmd_vel_msg_ptr->linear.x = vel_lin_;
+      {
+        // Either all sensors are ok or it already finished turning.
+        const haros::MessageEvent<kobuki_msgs::BumperEvent> bump = lastBump();
+        const haros::MessageEvent<kobuki_msgs::CliffEvent> cliff = lastCliff();
+        ROS_ASSERT((!bump && !cliff)
+            || (ros::Time::now() - turning_start_) >= turning_duration_);
+      }
       cmd_vel_publisher_.publish(cmd_vel_msg_ptr);
     }
   }
-};
+}
+
+haros::MessageEvent<kobuki_msgs::BumperEvent>
+RandomWalkerController::lastBump() const
+{
+  const haros::MessageEvent<kobuki_msgs::BumperEvent>
+      left = bumper_event_subscriber_.lastReceive("left"),
+      center = bumper_event_subscriber_.lastReceive("center"),
+      right = bumper_event_subscriber_.lastReceive("right");
+  const bool left_bump =
+      left && left.msg->state == kobuki_msgs::BumperEvent::PRESSED;
+  const bool center_bump =
+      center && center.msg->state == kobuki_msgs::BumperEvent::PRESSED;
+  const bool right_bump =
+      right && right.msg->state == kobuki_msgs::BumperEvent::PRESSED;
+  if (left_bump && center_bump && right_bump)
+  {
+    if (left > center)
+      { return left > right ? left : right; }
+    return center > right ? center : right;
+  }
+  if (left_bump)
+  {
+    if (center_bump)
+      { return left > center ? left : center; }
+    if (right_bump)
+      { return left > right ? left : right; }
+    return left;
+  }
+  if (center_bump)
+  {
+    if (right_bump)
+      { return center > right ? center : right; }
+    return center;
+  }
+  if (right_bump)
+    { return right; }
+  return haros::MessageEvent<kobuki_msgs::BumperEvent>();
+}
+
+haros::MessageEvent<kobuki_msgs::CliffEvent>
+RandomWalkerController::lastCliff() const
+{
+  const haros::MessageEvent<kobuki_msgs::CliffEvent>
+      left = cliff_event_subscriber_.lastReceive("left"),
+      center = cliff_event_subscriber_.lastReceive("center"),
+      right = cliff_event_subscriber_.lastReceive("right");
+  const bool left_cliff =
+      left && left.msg->state == kobuki_msgs::CliffEvent::CLIFF;
+  const bool center_cliff =
+      center && center.msg->state == kobuki_msgs::CliffEvent::CLIFF;
+  const bool right_cliff =
+      right && right.msg->state == kobuki_msgs::CliffEvent::CLIFF;
+  if (left_cliff && center_cliff && right_cliff)
+  {
+    if (left > center)
+      { return left > right ? left : right; }
+    return center > right ? center : right;
+  }
+  if (left_cliff)
+  {
+    if (center_cliff)
+      { return left > center ? left : center; }
+    if (right_cliff)
+      { return left > right ? left : right; }
+    return left;
+  }
+  if (center_cliff)
+  {
+    if (right_cliff)
+      { return center > right ? center : right; }
+    return center;
+  }
+  if (right_cliff)
+    { return right; }
+  return haros::MessageEvent<kobuki_msgs::CliffEvent>();
+}
 
 } // namespace kobuki
 #endif /* RANDOM_WALKER_CONTROLLER_HPP_ */

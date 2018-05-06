@@ -7,7 +7,8 @@ find_package(catkin REQUIRED COMPONENTS ecl_threads
                                         pluginlib
                                         roscpp
                                         std_msgs
-                                        yocs_controllers)
+                                        yocs_controllers
+                                        haros)
 
 catkin_package(INCLUDE_DIRS include
                LIBRARIES kobuki_random_walker_nodelet
@@ -18,7 +19,8 @@ catkin_package(INCLUDE_DIRS include
                               pluginlib
                               roscpp
                               std_msgs
-                              yocs_controllers)
+                              yocs_controllers
+                              haros)
 
 include_directories(include
                     ${catkin_INCLUDE_DIRS})
