@@ -176,6 +176,8 @@ private:
   void resetSafetyStatesCB(const std_msgs::EmptyConstPtr msg);
 
   haros::MessageEvent<kobuki_msgs::WheelDropEvent> lastWheelDrop();
+
+  bool isWheelDrop(haros::MessageEvent<kobuki_msgs::WheelDropEvent> evt) const;
 };
 
 
@@ -481,21 +483,13 @@ void SafetyController::spin()
 
 haros::MessageEvent<kobuki_msgs::WheelDropEvent> SafetyController::lastWheelDrop()
 {
-  const haros::MessageEvent<kobuki_msgs::WheelDropEvent> left =
-      wheel_event_subscriber_.lastReceive("left");
-  const haros::MessageEvent<kobuki_msgs::WheelDropEvent> right =
-      wheel_event_subscriber_.lastReceive("right");
-  const bool left_drop =
-      left && left.msg->state == kobuki_msgs::WheelDropEvent::DROPPED;
-  const bool right_drop =
-      right && right.msg->state == kobuki_msgs::WheelDropEvent::DROPPED;
-  if (left_drop && right_drop)
-    { return left > right ? left : right; }
-  if (left_drop)
-    { return left; }
-  if (right_drop)
-    { return right; }
-  return haros::MessageEvent<kobuki_msgs::WheelDropEvent>();
+  return wheel_event_subscriber_.lastReceiveWhere(&SafetyController::isWheelDrop, this);
+}
+
+bool SafetyController::isWheelDrop(
+    haros::MessageEvent<kobuki_msgs::WheelDropEvent> evt) const
+{
+  return evt.msg->state == kobuki_msgs::WheelDropEvent::DROPPED;
 }
 
 } // namespace kobuki

@@ -182,6 +182,10 @@ private:
   haros::MessageEvent<kobuki_msgs::BumperEvent> lastBump() const;
 
   haros::MessageEvent<kobuki_msgs::CliffEvent> lastCliff() const;
+
+  bool isBump(haros::MessageEvent<kobuki_msgs::BumperEvent> evt) const;
+
+  bool isCliff(haros::MessageEvent<kobuki_msgs::CliffEvent> evt) const;
 };
 
 void RandomWalkerController::enableCB(const std_msgs::EmptyConstPtr msg)
@@ -620,77 +624,25 @@ void RandomWalkerController::spin()
 haros::MessageEvent<kobuki_msgs::BumperEvent>
 RandomWalkerController::lastBump() const
 {
-  const haros::MessageEvent<kobuki_msgs::BumperEvent>
-      left = bumper_event_subscriber_.lastReceive("left"),
-      center = bumper_event_subscriber_.lastReceive("center"),
-      right = bumper_event_subscriber_.lastReceive("right");
-  const bool left_bump =
-      left && left.msg->state == kobuki_msgs::BumperEvent::PRESSED;
-  const bool center_bump =
-      center && center.msg->state == kobuki_msgs::BumperEvent::PRESSED;
-  const bool right_bump =
-      right && right.msg->state == kobuki_msgs::BumperEvent::PRESSED;
-  if (left_bump && center_bump && right_bump)
-  {
-    if (left > center)
-      { return left > right ? left : right; }
-    return center > right ? center : right;
-  }
-  if (left_bump)
-  {
-    if (center_bump)
-      { return left > center ? left : center; }
-    if (right_bump)
-      { return left > right ? left : right; }
-    return left;
-  }
-  if (center_bump)
-  {
-    if (right_bump)
-      { return center > right ? center : right; }
-    return center;
-  }
-  if (right_bump)
-    { return right; }
-  return haros::MessageEvent<kobuki_msgs::BumperEvent>();
+  return bumper_event_subscriber_.lastReceiveWhere(&RandomWalkerController::isBump,
+    (RandomWalkerController *) this);
 }
 
 haros::MessageEvent<kobuki_msgs::CliffEvent>
 RandomWalkerController::lastCliff() const
 {
-  const haros::MessageEvent<kobuki_msgs::CliffEvent>
-      left = cliff_event_subscriber_.lastReceive("left"),
-      center = cliff_event_subscriber_.lastReceive("center"),
-      right = cliff_event_subscriber_.lastReceive("right");
-  const bool left_cliff =
-      left && left.msg->state == kobuki_msgs::CliffEvent::CLIFF;
-  const bool center_cliff =
-      center && center.msg->state == kobuki_msgs::CliffEvent::CLIFF;
-  const bool right_cliff =
-      right && right.msg->state == kobuki_msgs::CliffEvent::CLIFF;
-  if (left_cliff && center_cliff && right_cliff)
-  {
-    if (left > center)
-      { return left > right ? left : right; }
-    return center > right ? center : right;
-  }
-  if (left_cliff)
-  {
-    if (center_cliff)
-      { return left > center ? left : center; }
-    if (right_cliff)
-      { return left > right ? left : right; }
-    return left;
-  }
-  if (center_cliff)
-  {
-    if (right_cliff)
-      { return center > right ? center : right; }
-    return center;
-  }
-  if (right_cliff)
-    { return right; }
-  return haros::MessageEvent<kobuki_msgs::CliffEvent>();
+  return cliff_event_subscriber_.lastReceiveWhere(&RandomWalkerController::isCliff,
+    (RandomWalkerController *) this);
+}
+
+bool RandomWalkerController::isBump(haros::MessageEvent<kobuki_msgs::BumperEvent> evt) const
+{
+  return evt.msg->state == kobuki_msgs::BumperEvent::PRESSED;
+}
+
+bool RandomWalkerController::isCliff(haros::MessageEvent<kobuki_msgs::CliffEvent> evt) const
+{
+  return evt.msg->state == kobuki_msgs::CliffEvent::CLIFF;
 }
 
 } // namespace kobuki
